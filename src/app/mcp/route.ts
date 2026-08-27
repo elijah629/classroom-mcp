@@ -9,7 +9,6 @@ import { config } from "@/lib/config";
 import { buildMcpServer } from "@/lib/mcp-server";
 import { verifyMcpAccessToken } from "@/lib/mcp-token";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const verifier: OAuthTokenVerifier = {
