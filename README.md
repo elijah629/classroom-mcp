@@ -1,10 +1,10 @@
-# Google Classroom MCP — Next.js Edge + Google OAuth
+# Google Classroom MCP — Next.js + Google OAuth
 
-A remote, read-only Google Classroom MCP designed for ChatGPT/agent clients. It replaces a local stdio + `tokens.json` architecture with a stateless Next.js App Router endpoint, OAuth discovery, an interactive Google sign-in flow, high-information Classroom tools, and Drive attachment text extraction.
+A remote, read-only Google Classroom MCP designed for ChatGPT/agent clients. It replaces a local stdio + `tokens.json` architecture with stateless Next.js App Router Route Handlers, OAuth discovery, an interactive Google sign-in flow, high-information Classroom tools, and Drive attachment text extraction.
 
 ## What this implementation does
 
-- Runs `/mcp` as a web-standard MCP endpoint on the Next.js Edge runtime.
+- Runs `/mcp` as a web-standard MCP endpoint on the default Next.js Node.js runtime.
 - Uses the current `@modelcontextprotocol/server` v2 API instead of the v1 monolithic SDK.
 - Implements OAuth Protected Resource Metadata and OAuth Authorization Server Metadata.
 - Supports both OAuth Client ID Metadata Documents (CIMD) and Dynamic Client Registration (DCR) for client compatibility.
@@ -87,15 +87,15 @@ as the remote MCP server URL in your MCP client / ChatGPT custom app. The first 
 
 For ChatGPT, keep `offline_access` advertised. This implementation adds it even if a client omits it so that an MCP refresh token can be issued and the connector does not need a Google sign-in each time the short-lived access token expires.
 
-## Edge-runtime caveat
+## Runtime
 
-Everything here is written for Web APIs (`fetch`, Web Crypto, `Request`, `Response`) and marks the MCP/OAuth route handlers as `runtime = "edge"`. PDF extraction is the heaviest dependency because PDF.js-like code can create a large edge bundle. `unpdf` is loaded dynamically and the extractor has byte/page/time limits, but if Vercel rejects the Edge bundle for your plan, keep `/mcp` on Edge and move only PDF text extraction to a Node route or external document service. Google Docs/Sheets/Slides extraction does not require that fallback.
+All MCP and OAuth endpoints use Next.js App Router Route Handlers on the default Node.js runtime. This matches Next.js 16 guidance and avoids Edge runtime package restrictions. The implementation still uses portable Web APIs where practical.
 
 ## Security notes
 
 This project is intentionally stateless. That makes Vercel deployment simple, but it means the server cannot centrally revoke one already-issued MCP refresh token or guarantee one-time authorization-code consumption without persistent storage. Google revocation or rotating `AUTH_SECRET` invalidates access globally. If you turn this from a personal connector into a multi-user service, replace the self-contained refresh-token/code storage with a database/KV-backed authorization server that supports revocation, one-time code use, token rotation/reuse detection, and account disconnects.
 
-Set `ALLOWED_GOOGLE_EMAILS` for a personal deployment. `ALLOWED_CIMD_HOSTS` can additionally restrict OAuth client metadata fetching; that is useful as SSRF defense-in-depth on a public endpoint.
+Set `ALLOWED_GOOGLE_EMAILS` for a personal deployment. Set `ALLOWED_CIMD_HOSTS=chatgpt.com` for ChatGPT; CIMD URL fetching is denied when this allowlist is empty.
 
 ## Current API boundaries
 

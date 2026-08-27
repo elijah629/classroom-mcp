@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { config } from "@/lib/config";
 import { seal } from "@/lib/crypto";
 import { googleAuthorizationUrl } from "@/lib/google-auth";
-import { normalizeRequestedScopes, resolveOAuthClient } from "@/lib/oauth";
+import {
+  isValidPkceValue,
+  normalizeRequestedScopes,
+  resolveOAuthClient,
+} from "@/lib/oauth";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
@@ -25,7 +28,11 @@ export async function GET(request: Request) {
       );
     if (!clientId || !redirectUri)
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-    if (!codeChallenge || codeChallengeMethod !== "S256") {
+    if (
+      !codeChallenge ||
+      codeChallengeMethod !== "S256" ||
+      !isValidPkceValue(codeChallenge)
+    ) {
       return NextResponse.json(
         {
           error: "invalid_request",

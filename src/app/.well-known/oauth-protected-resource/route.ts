@@ -1,6 +1,5 @@
 import { protectedResourceMetadata } from "@/lib/oauth";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
@@ -8,6 +7,16 @@ export async function GET() {
     headers: {
       "Access-Control-Allow-Origin": "*",
       "Cache-Control": "public, max-age=300",
+    },
+  });
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
     },
   });
 }

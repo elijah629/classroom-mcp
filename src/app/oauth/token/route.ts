@@ -6,8 +6,8 @@ import {
   issueMcpRefreshToken,
   readMcpRefreshToken,
 } from "@/lib/mcp-token";
+import { isValidPkceValue } from "@/lib/oauth";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 type AuthCode = {
@@ -44,7 +44,13 @@ export async function POST(request: Request) {
       const code = String(form.get("code") ?? "");
       const redirectUri = String(form.get("redirect_uri") ?? "");
       const codeVerifier = String(form.get("code_verifier") ?? "");
-      if (!code || !clientId || !redirectUri || !codeVerifier) {
+      if (
+        !code ||
+        !clientId ||
+        !redirectUri ||
+        !codeVerifier ||
+        !isValidPkceValue(codeVerifier)
+      ) {
         return tokenResponse({ error: "invalid_request" }, 400);
       }
 
@@ -95,10 +101,10 @@ export async function POST(request: Request) {
 
     if (grantType === "refresh_token") {
       const refreshToken = String(form.get("refresh_token") ?? "");
-      if (!refreshToken)
+      if (!refreshToken || !clientId)
         return tokenResponse({ error: "invalid_request" }, 400);
       const stored = await readMcpRefreshToken(refreshToken);
-      if (clientId && stored.clientId !== clientId) {
+      if (stored.clientId !== clientId) {
         return tokenResponse({ error: "invalid_grant" }, 400);
       }
 

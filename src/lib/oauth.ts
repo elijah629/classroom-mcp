@@ -1,7 +1,13 @@
+import {
+  buildOAuthProtectedResourceMetadata,
+  type OAuthMetadata,
+} from "@modelcontextprotocol/server";
 import { config, MCP_SCOPES } from "./config";
 import { seal, unseal } from "./crypto";
 
-export const oauthMetadata = {
+const PKCE_VALUE = /^[A-Za-z0-9\-._~]{43,128}$/;
+
+export const oauthMetadata: OAuthMetadata = {
   issuer: config.origin,
   authorization_endpoint: `${config.origin}/oauth/authorize`,
   token_endpoint: `${config.origin}/oauth/token`,
@@ -15,12 +21,12 @@ export const oauthMetadata = {
   client_id_metadata_document_supported: true,
 };
 
-export const protectedResourceMetadata = {
-  resource: config.mcpUrl,
-  authorization_servers: [config.origin],
-  scopes_supported: ["mcp"],
-  bearer_methods_supported: ["header"],
-};
+export const protectedResourceMetadata = buildOAuthProtectedResourceMetadata({
+  oauthMetadata,
+  resourceServerUrl: new URL(config.mcpUrl),
+  scopesSupported: ["mcp"],
+  resourceName: "Google Classroom MCP",
+});
 
 export interface OAuthClient {
   clientId: string;
@@ -63,6 +69,7 @@ async function clientFromCimd(clientId: string): Promise<OAuthClient> {
     throw new Error("private_client_metadata_host_rejected");
 
   const allow = config.allowedCimdHosts;
+  if (!allow.length) throw new Error("client_metadata_hosts_not_configured");
   if (
     allow.length &&
     !allow.some(
@@ -79,8 +86,11 @@ async function clientFromCimd(clientId: string): Promise<OAuthClient> {
       signal: controller.signal,
       headers: { Accept: "application/json" },
       cache: "no-store",
-      redirect: "error",
+      redirect: "manual",
     });
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error("client_metadata_redirect_rejected");
+    }
     if (!response.ok) throw new Error("client_metadata_fetch_failed");
     const doc = (await response.json()) as Record<string, unknown>;
     if (doc.client_id !== clientId)
@@ -137,6 +147,10 @@ export async function resolveOAuthClient(
     redirectUris: payload.redirectUris,
     clientName: payload.clientName,
   };
+}
+
+export function isValidPkceValue(value: string): boolean {
+  return PKCE_VALUE.test(value);
 }
 
 export function normalizeRequestedScopes(scope: string | null): string[] {

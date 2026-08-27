@@ -96,6 +96,8 @@ export async function googleUserInfo(
 
 export function assertGoogleUserAllowed(user: GoogleUserInfo) {
   const allow = config.allowedGoogleEmails;
+  if (user.email_verified !== true)
+    throw new Error("google_email_not_verified");
   if (allow.length && !allow.includes(user.email.toLowerCase())) {
     throw new Error("google_account_not_allowed");
   }

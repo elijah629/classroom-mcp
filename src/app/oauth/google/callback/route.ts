@@ -8,7 +8,6 @@ import {
 } from "@/lib/google-auth";
 import { oauthErrorRedirect } from "@/lib/oauth";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 type GoogleState = {

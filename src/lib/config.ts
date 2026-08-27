@@ -4,6 +4,37 @@ function required(name: string): string {
   return value;
 }
 
+function origin(): string {
+  const value = required("APP_ORIGIN").replace(/\/$/, "");
+  const url = new URL(value);
+  const local =
+    url.hostname === "localhost" ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]";
+  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) {
+    throw new Error("APP_ORIGIN must use HTTPS outside localhost");
+  }
+  if (
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      "APP_ORIGIN must contain only scheme, host, and optional port",
+    );
+  }
+  return url.origin;
+}
+
+function authSecret(): string {
+  const value = required("AUTH_SECRET");
+  if (value.length < 32)
+    throw new Error("AUTH_SECRET must be at least 32 characters");
+  return value;
+}
+
 function integer(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -13,7 +44,7 @@ function integer(name: string, fallback: number): number {
 
 export const config = {
   get origin() {
-    return required("APP_ORIGIN").replace(/\/$/, "");
+    return origin();
   },
   get mcpUrl() {
     return `${this.origin}/mcp`;
@@ -25,7 +56,7 @@ export const config = {
     return required("GOOGLE_CLIENT_SECRET");
   },
   get authSecret() {
-    return required("AUTH_SECRET");
+    return authSecret();
   },
   get googleCallbackUrl() {
     return `${this.origin}/oauth/google/callback`;
