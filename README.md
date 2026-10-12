@@ -2,13 +2,14 @@
 
 Remote Google Classroom MCP using Next.js Route Handlers, Google OAuth and the MCP server SDK. Student workflows are the entry point; **every method in the checked-in stable Discovery specification has its own tool**, including teacher/admin methods. Google still enforces roles, scopes, domain policies, licenses, add-on ownership and project association.
 
-Current snapshot: Google revision `20261006`, **104 independent API tools + 7 workflow/attachment tools**. Exact method-to-tool names: [API_COVERAGE.md](API_COVERAGE.md). Long names receive a deterministic hash suffix to stay within 64 characters.
+Current snapshot: Google revision `20261006`, **104 independent API tools + 8 workflow/attachment tools**. Exact method-to-tool names: [API_COVERAGE.md](API_COVERAGE.md). Long names receive a deterministic hash suffix to stay within 64 characters.
 
 ## Agent workflow tools
 
 | Tool | Use |
 | --- | --- |
-| `classroom_overview` | Student's active classes, assignments, own submission status and recent posts. Start here for planning. |
+| `classroom_get_pending_assignments` | Upcoming/overdue pending work across active courses, compact joins, local deadlines and explicit coverage. Start here for homework/deadline questions. |
+| `classroom_overview` | Bounded context: active classes, assignments, own submission status and recent posts. Empty assignments do not establish no homework when coverage is incomplete. |
 | `classroom_course_context` | One course, topics, assignments, own submissions, materials, announcements; optional original-file bundle. |
 | `classroom_assignment_context` | Assignment, course, rubrics, own submission and original attachments in one call; downloads enabled by default. |
 | `classroom_search` | Search titles, descriptions, announcements and teacher/student attachment **metadata** across courses. |
@@ -19,6 +20,24 @@ Current snapshot: Google revision `20261006`, **104 independent API tools + 7 wo
 Tools preserve original Google records in `sources`; joined views contain IDs and status for navigation. `from`/`to` apply to assignment due dates and post update/creation timestamps. `includeNoDue` defaults true. Source records describe the bounded fetched set; joined views and course attachment bundles respect filters. Overview lists student enrollment; independent tools also support teacher/admin queries.
 
 Combined reads expose per-source errors, `partial`, `truncated`, and continuation instructions. List sources fetch at most three pages and `maxItemsPerSource` records (default 50, maximum 100). Overview defaults to at most ten courses, configurable to thirty. `continuation.arguments` can be passed to the named independent method; `offset` means skip that many records in the returned page. A failed course/source does not discard successful sources. An unavailable or incomplete submissions source cannot establish that an assignment is missing; such assignments use `unknown` status. Search is bounded; absence of a match does not establish absence from unfetched records.
+
+### Completeness and pending work
+
+`hadErrors` reports upstream failures. `coverageComplete` means all requested courses/sources were scanned without errors or truncation. `unknownItemsPossible` is its inverse. Legacy `partial` still means source errors only, so `partial:false` can accompany `coverageComplete:false`. `resultLimitReached` reports an output-match limit, independently of source coverage. Overview includes `coverageByCourse`, fetched counts, source continuations and applied filters. Search additionally returns `corpusComplete`, `resultsComplete`, and `negativeResult:"notFoundInScannedItems"` for zero matches with incomplete coverage. Search `matchesTruncated:false` describes only the match limit; it never guarantees corpus coverage. Response-budget fallbacks also explicitly set coverage incomplete.
+
+For pending work:
+
+```json
+{"timeZone":"America/Los_Angeles","start":"2026-10-12T00:00:00-07:00","end":"2026-10-12T23:59:59-07:00","includeOverdue":false}
+```
+
+`timeZone` is required and validated; date bounds accept ISO timestamps with UTC or explicit offsets. Without `start`, the lower bound is the response's `asOf`. `includeOverdue` defaults true and adds deadlines before `asOf`, even before `start`; set false for a strictly upcoming date window. `end` always applies. Submitted work is excluded. Returned work is excluded unless `includeReturned:true`; returned does not imply revision needed. Undated work defaults off; opt in with `includeUndated:true` and optionally `undatedSince` to filter update/creation timestamps. Recency and topic IDs provide context, not proof of current relevance.
+
+The pending tool fetches coursework and own submissions across pages independently of the overview's shared raw-record budget, joining by course/work ID and deduplicating repeated work IDs. It requests only summary fields from Google and never downloads attachments. Scan limits: 100 active courses, 100 pages and 10,000 records per source, plus `MAX_WORKFLOW_CHARS` per projected source. Limits/errors always set `coverageComplete:false`, with actionable independent-source continuations. Narrow `courseIds` or follow those continuations to finish an incomplete scan. `continuation.methodId` is an official Discovery method ID, mapped to the independent tool in `API_COVERAGE.md`; `arguments` are its parameters and `offset` skips items within that page.
+
+`maxResults` defaults 50 (maximum 100). `nextCursor` pages **scanned matches**, not unscanned sources; keep filters unchanged when passing it back. Each page re-scans live Google data with a fixed `asOf`, so concurrent edits may shift result pages. `scannedMatchCount` is not an authoritative total when coverage is incomplete. `resultsComplete` requires complete coverage and no remaining match pages. Inspect coverage even when `nextCursor` is null.
+
+Assignments retain raw `dueDate`/`dueTime`, `dueAtUtc`, `dueAtLocal` (with numeric UTC offset), `localDueDate`, and `dueTimeSpecified`. UTC time fields omitted within an existing `dueTime` mean zero; DST conversion follows the selected IANA zone. A date with no `dueTime` retains the legacy 23:59:59 UTC filter/sort convention, explicitly marked `dueTimeSpecified:false`; this is not a teacher-specified due time. `rawSubmissionState` and `studentStatus` distinguish `NEW`/`not_started`, `CREATED`/`in_progress_not_submitted`, `TURNED_IN`/`submitted`, `RETURNED`/`returned`, and `RECLAIMED_BY_STUDENT`/`reclaimed`. An absent submission remains `unknown`.
 
 ## Independent API tools
 

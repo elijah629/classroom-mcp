@@ -12,6 +12,7 @@ import {
   toolResult,
 } from "./classroom-api";
 import { config } from "./config";
+import { pendingAssignments } from "./pending-work";
 import {
   assignmentBundle,
   courseBundle,
@@ -85,18 +86,37 @@ export function boundWorkflow(
   if (JSON.stringify(data).length <= config.maxWorkflowChars) return data;
   return {
     truncated: true,
+    coverageComplete: false,
+    unknownItemsPossible: true,
+    hadErrors: data.hadErrors ?? data.partial ?? false,
+    resultLimitReached: true,
+    resultsComplete: false,
+    corpusComplete: false,
     reason:
       "Workflow metadata exceeds response budget. No document text was extracted or shortened.",
     continuation: {
       tool,
       arguments: {
         ...args,
-        includeFiles: false,
-        maxItemsPerSource: Math.max(
-          1,
-          Math.floor(Number(args.maxItemsPerSource ?? 50) / 2),
-        ),
-        maxCourses: 1,
+        ...(tool === "classroom_get_pending_assignments"
+          ? {
+              maxResults: Math.max(
+                1,
+                Math.floor(Number(args.maxResults ?? 50) / 2),
+              ),
+            }
+          : {
+              ...("includeFiles" in args ? { includeFiles: false } : {}),
+              ...("maxItemsPerSource" in args
+                ? {
+                    maxItemsPerSource: Math.max(
+                      1,
+                      Math.floor(Number(args.maxItemsPerSource) / 2),
+                    ),
+                  }
+                : {}),
+              ...("maxCourses" in args ? { maxCourses: 1 } : {}),
+            }),
       },
     },
     courseId: args.courseId,
@@ -109,10 +129,54 @@ export function buildMcpServer(authInfo?: AuthInfo): McpServer {
     { name: "google-classroom", version: "0.2.0" },
     {
       instructions:
-        "Start with classroom_overview, classroom_search or classroom_assignment_context. Independent classroom_* methods cover the official API. Check partial/truncated/source errors and continuations. Attachments are original binary resources or Drive MCP handoffs, never extracted text. Google controls roles, scopes and project association; availability of a tool is not permission to execute it. Turn-in requires explicit agent/user intent; combined submission defaults to attachment-only.",
+        "For due/pending work start with classroom_get_pending_assignments and explicit timeZone. For context use classroom_overview, classroom_search or classroom_assignment_context. Independent classroom_* methods cover the official API. Never infer no homework or no match when coverageComplete/corpusComplete is false. partial means source errors only; truncated means bounded scan. Check continuations. Attachments are original binary resources or Drive MCP handoffs, never extracted text. Google controls roles, scopes and project association; availability of a tool is not permission to execute it. Turn-in requires explicit agent/user intent; combined submission defaults to attachment-only.",
     },
   );
   registerClassroomTools(server, authInfo);
+  server.registerTool(
+    "classroom_get_pending_assignments",
+    {
+      title: "My upcoming and overdue pending assignments",
+      description:
+        "Use for homework/deadlines. Scans active courses and paginates coursework and own submissions server-side, joins by course/work ID. Compact metadata with UTC/local deadlines, raw and student submission states. Explicit timeZone required. Excludes submitted, returned and undated work by default. includeOverdue adds past deadlines even before start. Inspect coverageComplete and source continuations before concluding nothing due. nextCursor pages scanned matches only; keep filters unchanged. No files downloaded.",
+      inputSchema: z.strictObject({
+        start: z.iso.datetime({ offset: true }).optional(),
+        end: z.iso.datetime({ offset: true }).optional(),
+        timeZone: z
+          .string()
+          .min(1)
+          .describe(
+            "IANA time zone, e.g. America/Los_Angeles; use student's explicit zone.",
+          ),
+        includeOverdue: z.boolean().default(true),
+        includeUndated: z.boolean().default(false),
+        includeReturned: z.boolean().default(false),
+        undatedSince: z.iso
+          .datetime({ offset: true })
+          .optional()
+          .describe(
+            "Include undated work only if update/creation time is at or after this timestamp; not evidence of current relevance.",
+          ),
+        courseIds: z.array(z.string().min(1)).min(1).max(100).optional(),
+        maxResults: z.number().int().min(1).max(100).default(50),
+        cursor: z.string().min(1).max(2048).optional(),
+      }),
+      annotations: readOnly,
+    },
+    async (args) => {
+      try {
+        return toolResult(
+          boundWorkflow(
+            await pendingAssignments(googleContext(authInfo), args),
+            "classroom_get_pending_assignments",
+            args,
+          ),
+        );
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
   server.registerResource(
     "classroom_original_file",
     new ResourceTemplate("classroom-drive://files/{fileId}", {
@@ -141,7 +205,7 @@ export function buildMcpServer(authInfo?: AuthInfo): McpServer {
     {
       title: "Classes, assignments and my submission status",
       description:
-        "Best first call for planning. Joins active classes, assignments, your submissions and optional posts. Date bounds filter assignment due dates and post timestamps. Original Google records remain in sources; bounded fetching can be partial. Inspect all continuation/error metadata. Does not download files.",
+        "Bounded context for planning. For due-work queries use classroom_get_pending_assignments. Joins active classes, assignments, your submissions and optional posts. Date bounds filter assignment due dates and post timestamps. Original Google records remain in sources. coverageComplete:false means empty assignments cannot establish no homework; partial means source errors only. Inspect continuation/error metadata. Does not download files.",
       inputSchema: z.strictObject(defaults),
       annotations: readOnly,
     },
@@ -334,6 +398,17 @@ export function buildMcpServer(authInfo?: AuthInfo): McpServer {
               partial: result.partial,
               truncated: result.truncated || matchesTruncated,
               matchesTruncated,
+              hadErrors: result.hadErrors,
+              coverageComplete: result.coverageComplete,
+              corpusComplete: result.coverageComplete,
+              resultsComplete: result.coverageComplete && !matchesTruncated,
+              resultLimitReached: matchesTruncated,
+              negativeResult: matches.length
+                ? null
+                : result.coverageComplete
+                  ? "notFound"
+                  : "notFoundInScannedItems",
+              filters: result.filters,
               ...(matchesTruncated
                 ? {
                     continuation: {
@@ -401,6 +476,9 @@ export function buildMcpServer(authInfo?: AuthInfo): McpServer {
             coverage,
             truncated: source.truncated,
             partial: source.partial,
+            hadErrors: source.hadErrors,
+            coverageComplete: source.coverageComplete,
+            unknownItemsPossible: source.unknownItemsPossible,
           },
           "classroom_attachment_bundle",
           args,

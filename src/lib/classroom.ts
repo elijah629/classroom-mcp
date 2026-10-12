@@ -141,10 +141,10 @@ export function dueDateIso(work: ClassroomCourseWork): string | null {
       d.year,
       d.month - 1,
       d.day,
-      t.hours ?? 23,
-      t.minutes ?? 59,
-      t.seconds ?? 59,
-      0,
+      t.hours ?? (work.dueTime ? 0 : 23),
+      t.minutes ?? (work.dueTime ? 0 : 59),
+      t.seconds ?? (work.dueTime ? 0 : 59),
+      Math.floor((t.nanos ?? 0) / 1_000_000),
     ),
   ).toISOString();
 }

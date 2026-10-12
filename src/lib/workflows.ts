@@ -29,6 +29,8 @@ export interface SourceResult {
 export interface SourceOptions {
   maxItems: number;
   maxChars: number;
+  maxPages?: number;
+  project?: (item: Item) => Item;
 }
 export async function listSource(
   context: GoogleContext,
@@ -41,7 +43,7 @@ export async function listSource(
   let pageToken: string | undefined;
   let chars = 0;
   try {
-    for (let page = 0; page < 3; page++) {
+    for (let page = 0; page < (options.maxPages ?? 3); page++) {
       const argumentsForPage = {
         ...args,
         pageSize: Math.min(options.maxItems, 100),
@@ -52,7 +54,9 @@ export async function listSource(
         ? (response[field] as Item[])
         : [];
       for (let index = 0; index < items.length; index++) {
-        const item = items[index];
+        const item = options.project
+          ? options.project(items[index])
+          : items[index];
         const size = JSON.stringify(item).length;
         if (
           result.data.length >= options.maxItems ||
@@ -95,9 +99,10 @@ export async function listSource(
     return {
       ...result,
       error: describeError(error),
-      ...(pageToken
-        ? { continuation: { methodId, arguments: { ...args, pageToken } } }
-        : {}),
+      continuation: {
+        methodId,
+        arguments: { ...args, ...(pageToken ? { pageToken } : {}) },
+      },
     };
   }
 }
@@ -117,8 +122,38 @@ export async function getSource(
       };
     return { data: [data], truncated: false };
   } catch (error) {
-    return { data: [], truncated: false, error: describeError(error) };
+    return {
+      data: [],
+      truncated: false,
+      error: describeError(error),
+      continuation: { methodId, arguments: args },
+    };
   }
+}
+export function sourceCoverage(sources: Record<string, SourceResult>) {
+  const hadErrors = Object.values(sources).some((source) => !!source.error);
+  const coverageComplete = Object.values(sources).every(
+    (source) => !source.error && !source.truncated,
+  );
+  return {
+    hadErrors,
+    coverageComplete,
+    unknownItemsPossible: !coverageComplete,
+    // Legacy partial means errors only, not truncation.
+    partial: hadErrors,
+    coverage: Object.fromEntries(
+      Object.entries(sources).map(([key, source]) => [
+        key,
+        {
+          fetchedCount: source.data.length,
+          complete: !source.error && !source.truncated,
+          truncated: source.truncated,
+          error: source.error,
+          continuation: source.continuation,
+        },
+      ]),
+    ),
+  };
 }
 export interface WorkflowOptions {
   from?: string;
@@ -340,6 +375,7 @@ export async function courseBundle(
   };
   return {
     courseId,
+    ...sourceCoverage(sources),
     sources,
     assignments: joined,
     posts: postViews,
@@ -416,6 +452,22 @@ export async function overview(
     courses: bundles,
     courseDiscovery: courses,
     range: { from: options.from ?? null, to: options.to ?? null },
+    filters: options,
+    hadErrors: !!courses.error || bundles.some((b) => b.hadErrors),
+    coverageComplete:
+      !courses.error &&
+      !courses.truncated &&
+      bundles.every((b) => b.coverageComplete),
+    unknownItemsPossible:
+      !!courses.error ||
+      courses.truncated ||
+      bundles.some((b) => !b.coverageComplete),
+    resultLimitReached: false,
+    coverageByCourse: bundles.map((b) => ({
+      courseId: b.courseId,
+      coverageComplete: b.coverageComplete,
+      sources: b.coverage,
+    })),
     truncated: courses.truncated || bundles.some((b) => b.truncated),
     partial: !!courses.error || bundles.some((b) => b.partial),
     note: "Joined assignments/posts are filtered views. sources contain original Google records fetched within explicit limits; inspect errors and continuations before drawing conclusions.",
@@ -477,6 +529,7 @@ export async function assignmentBundle(
   return {
     courseId,
     courseWorkId,
+    ...sourceCoverage(sources),
     sources,
     attachments: bundleAttachments(sources, courseId),
     truncated: Object.values(sources).some((s) => s.truncated),

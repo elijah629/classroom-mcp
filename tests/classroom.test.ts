@@ -11,6 +11,7 @@ import {
   normalizeAttachment,
   readOriginalFile,
 } from "../src/lib/attachments";
+import { dueDateIso } from "../src/lib/classroom";
 import {
   buildClassroomRequest,
   callClassroom,
@@ -37,6 +38,12 @@ import {
   readMcpRefreshToken,
   verifyMcpAccessToken,
 } from "../src/lib/mcp-token";
+import {
+  localDeadline,
+  type PendingOptions,
+  pendingAssignments,
+  studentStatus,
+} from "../src/lib/pending-work";
 import {
   assignmentBundle,
   courseBundle,
@@ -123,7 +130,7 @@ describe("Discovery and independent methods", () => {
         expect((entry?.name.length ?? 0) <= 64).toBe(true);
         expect(() => z.fromJSONSchema(methodInputSchema(method))).not.toThrow();
       }
-      expect(listed.tools.length).toBe(allMethods.size + 7);
+      expect(listed.tools.length).toBe(allMethods.size + 8);
       const mutating = listed.tools.find(
         (tool) => tool.name === "classroom_courses_delete",
       );
@@ -589,6 +596,18 @@ describe("Bounded workflows and submission", () => {
     );
     expect(bounded.truncated).toBe(true);
     expect(bounded.continuation).toBeDefined();
+    expect(bounded.coverageComplete).toBe(false);
+    // Fallback arguments must remain valid for each strict workflow schema.
+    expect(bounded.continuation).toMatchObject({ arguments: {} });
+    const pending = boundWorkflow(
+      { big: "x".repeat(400000) },
+      "classroom_get_pending_assignments",
+      { timeZone: "UTC", maxResults: 50 },
+    );
+    expect(pending.continuation).toMatchObject({
+      arguments: { timeZone: "UTC", maxResults: 25 },
+    });
+    expect(JSON.stringify(pending.continuation)).not.toContain("includeFiles");
   });
   test("partial course/source failures preserve other course results and avoid inferred missing status", async () => {
     mockFetch((url) => {
@@ -1084,5 +1103,347 @@ describe("Workflow edge cases and HTTP authorization", () => {
     expect(createHash("sha256").update(restored).digest("hex")).toBe(
       createHash("sha256").update(pdf).digest("hex"),
     );
+  });
+});
+
+describe("Audit regressions: pending work and coverage", () => {
+  const pendingOptions: PendingOptions = {
+    timeZone: "America/Los_Angeles",
+    includeOverdue: true,
+    includeUndated: false,
+    includeReturned: false,
+    maxResults: 50,
+    start: "2026-10-11T00:00:00Z",
+    end: "2026-10-16T00:00:00Z",
+  };
+  function pendingMock() {
+    mockFetch((url) => {
+      const page = Number(url.searchParams.get("pageToken") ?? 0);
+      const courseId = url.pathname.split("/")[3];
+      if (url.pathname === "/v1/courses")
+        return json({
+          courses: [{ id: `c${page}`, name: `Course ${page}` }],
+          ...(page < 11 ? { nextPageToken: String(page + 1) } : {}),
+        });
+      if (url.pathname.endsWith("/courseWork"))
+        return json({
+          courseWork: [
+            {
+              id: `w${page}`,
+              courseId,
+              title: `Work ${page}`,
+              // Raw descriptions should never consume the compact pending budget.
+              description: "x".repeat(400000),
+              dueDate: { year: 2026, month: 10, day: 13 },
+              dueTime: { hours: 6, minutes: 59 },
+            },
+          ],
+          ...(page < 3 ? { nextPageToken: String(page + 1) } : {}),
+        });
+      if (url.pathname.endsWith("/studentSubmissions"))
+        return json({
+          studentSubmissions: [
+            {
+              id: `s${page}`,
+              courseWorkId: `w${page}`,
+              state: page === 3 ? "TURNED_IN" : "CREATED",
+            },
+          ],
+          ...(page < 3 ? { nextPageToken: String(page + 1) } : {}),
+        });
+      return json({ id: courseId, name: `Course ${courseId?.slice(1)}` });
+    });
+  }
+  test("broad and narrow joins agree beyond ten courses/three pages; metadata stays compact", async () => {
+    pendingMock();
+    const broad = await pendingAssignments(context, pendingOptions);
+    const narrow = await pendingAssignments(context, {
+      ...pendingOptions,
+      courseIds: ["c0"],
+    });
+    expect(broad.coverageComplete).toBe(true);
+    expect(broad.coverageByCourse.length).toBe(12);
+    expect(broad.assignments.length).toBe(36);
+    expect(broad.assignments.filter((item) => item.courseId === "c0")).toEqual(
+      narrow.assignments,
+    );
+    expect(narrow.assignments[0]).toMatchObject({
+      rawSubmissionState: "CREATED",
+      studentStatus: "in_progress_not_submitted",
+      dueAtLocal: "2026-10-12T23:59:00.000-07:00",
+      localDueDate: "2026-10-12",
+    });
+    expect(JSON.stringify(broad).length).toBeLessThan(50000);
+    expect(JSON.stringify(broad)).not.toContain("description");
+  });
+  test("result cursor pages deterministically, rejects changed filters and invalid cursors", async () => {
+    pendingMock();
+    const opts = { ...pendingOptions, courseIds: ["c0"], maxResults: 2 };
+    const first = await pendingAssignments(context, opts);
+    expect(first.coverageComplete).toBe(true);
+    expect(first.resultLimitReached).toBe(true);
+    expect(first.resultsComplete).toBe(false);
+    const second = await pendingAssignments(context, {
+      ...opts,
+      cursor: first.nextCursor ?? undefined,
+    });
+    expect(second.assignments.map((item) => item.courseWorkId)).toEqual(["w2"]);
+    expect(second.nextCursor).toBeNull();
+    expect(second.asOf).toBe(first.asOf);
+    await expect(
+      pendingAssignments(context, {
+        ...opts,
+        timeZone: "UTC",
+        cursor: first.nextCursor ?? undefined,
+      }),
+    ).rejects.toThrow("Invalid cursor");
+    await expect(
+      pendingAssignments(context, { ...opts, cursor: "bad" }),
+    ).rejects.toThrow("Invalid cursor");
+  });
+  test("source failure keeps matches unknown, complete empty remains distinct", async () => {
+    mockFetch((url) => {
+      if (url.pathname.endsWith("/studentSubmissions"))
+        return json({ error: { message: "Denied" } }, 403);
+      if (url.pathname.endsWith("/courseWork"))
+        return json({
+          courseWork: [
+            {
+              id: "w",
+              courseId: "c",
+              dueDate: { year: 2026, month: 10, day: 12 },
+            },
+          ],
+        });
+      return json({ id: "c", name: "Course" });
+    });
+    const result = await pendingAssignments(context, {
+      ...pendingOptions,
+      courseIds: ["c"],
+    });
+    expect(result.hadErrors).toBe(true);
+    expect(result.coverageComplete).toBe(false);
+    expect(result.assignments[0]?.status).toBe("unknown");
+    expect(
+      result.coverageByCourse[0]?.coverage.submissions.continuation,
+    ).toBeDefined();
+    mockFetch(() => json({}));
+    const empty = await pendingAssignments(context, pendingOptions);
+    expect(empty.assignments).toEqual([]);
+    expect(empty.coverageComplete).toBe(true);
+  });
+  test("pending scan cap retains source continuation rather than claiming complete empty", async () => {
+    mockFetch((url) => {
+      if (url.pathname.endsWith("/courseWork"))
+        return json({
+          courseWork: [],
+          nextPageToken: String(
+            Number(url.searchParams.get("pageToken") ?? 0) + 1,
+          ),
+        });
+      return json({ id: "c", name: "Course" });
+    });
+    const result = await pendingAssignments(context, {
+      ...pendingOptions,
+      courseIds: ["c"],
+    });
+    expect(result.assignments).toEqual([]);
+    expect(result.hadErrors).toBe(false);
+    expect(result.coverageComplete).toBe(false);
+    expect(result.nextCursor).toBeNull();
+    expect(
+      result.coverageByCourse[0]?.coverage.work.continuation?.arguments
+        .pageToken,
+    ).toBe("100");
+  });
+  test("pending course cap exposes omitted courses via discovery continuation", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/v1/courses")
+        return json({
+          courses: Array.from({ length: 100 }, (_, i) => ({
+            id: `c${i}`,
+            name: `Course ${i}`,
+          })),
+          nextPageToken: "remaining-courses",
+        });
+      return json({});
+    });
+    const result = await pendingAssignments(context, pendingOptions);
+    expect(result.coverageByCourse.length).toBe(100);
+    expect(result.coverageComplete).toBe(false);
+    expect(result.courseDiscovery.continuation?.arguments.pageToken).toBe(
+      "remaining-courses",
+    );
+  });
+  test("overdue option and end bound apply independently; repeated work IDs join once", async () => {
+    mockFetch((url) => {
+      if (url.pathname.endsWith("/courseWork"))
+        return json({
+          courseWork: [
+            {
+              id: "old",
+              courseId: "c",
+              dueDate: { year: 2020, month: 1, day: 1 },
+            },
+            {
+              id: "old",
+              courseId: "c",
+              dueDate: { year: 2020, month: 1, day: 1 },
+            },
+            {
+              id: "future",
+              courseId: "c",
+              dueDate: { year: 2099, month: 1, day: 1 },
+            },
+          ],
+        });
+      return json({ id: "c" });
+    });
+    const opts = {
+      ...pendingOptions,
+      courseIds: ["c"],
+      start: "2019-01-01T00:00:00Z",
+    };
+    expect(
+      (await pendingAssignments(context, opts)).assignments.map(
+        (item) => item.courseWorkId,
+      ),
+    ).toEqual(["old"]);
+    expect(
+      (await pendingAssignments(context, { ...opts, includeOverdue: false }))
+        .assignments,
+    ).toEqual([]);
+  });
+  test("time precision, midnight, DST and date-only convention", () => {
+    const work = {
+      id: "w",
+      courseId: "c",
+      dueDate: { year: 2026, month: 10, day: 13 },
+    };
+    expect(dueDateIso({ ...work, dueTime: { hours: 6, minutes: 59 } })).toBe(
+      "2026-10-13T06:59:00.000Z",
+    );
+    expect(dueDateIso({ ...work, dueTime: {} })).toBe(
+      "2026-10-13T00:00:00.000Z",
+    );
+    expect(dueDateIso(work)).toBe("2026-10-13T23:59:59.000Z");
+    expect(
+      localDeadline("2026-11-01T08:30:00.000Z", "America/Los_Angeles")
+        .dueAtLocal,
+    ).toBe("2026-11-01T01:30:00.000-07:00");
+    expect(
+      localDeadline("2026-11-01T09:30:00.000Z", "America/Los_Angeles")
+        .dueAtLocal,
+    ).toBe("2026-11-01T01:30:00.000-08:00");
+    expect(
+      localDeadline("2026-03-08T10:30:00.000Z", "America/Los_Angeles")
+        .dueAtLocal,
+    ).toBe("2026-03-08T03:30:00.000-07:00");
+    expect(localDeadline("2026-10-13T00:00:00.000Z", "UTC").dueAtLocal).toBe(
+      "2026-10-13T00:00:00.000+00:00",
+    );
+    expect(() => localDeadline(null, "Invalid/Zone")).toThrow();
+  });
+  test("states normalized, historical undated filtered only on explicit request", async () => {
+    expect(
+      [
+        "NEW",
+        "CREATED",
+        "TURNED_IN",
+        "RETURNED",
+        "RECLAIMED_BY_STUDENT",
+        undefined,
+      ].map(studentStatus),
+    ).toEqual([
+      "not_started",
+      "in_progress_not_submitted",
+      "submitted",
+      "returned",
+      "reclaimed",
+      "unknown",
+    ]);
+    mockFetch((url) => {
+      if (url.pathname.endsWith("/courseWork"))
+        return json({
+          courseWork: [
+            { id: "old", courseId: "c", creationTime: "2020-01-01T00:00:00Z" },
+            {
+              id: "recent",
+              courseId: "c",
+              updateTime: "2026-10-11T00:00:00Z",
+              topicId: "topic",
+            },
+            { id: "returned", courseId: "c" },
+          ],
+        });
+      if (url.pathname.endsWith("/studentSubmissions"))
+        return json({
+          studentSubmissions: [
+            { courseWorkId: "old", state: "NEW" },
+            { courseWorkId: "recent", state: "NEW" },
+            { courseWorkId: "returned", state: "RETURNED" },
+          ],
+        });
+      return json({ id: "c" });
+    });
+    const opts = { ...pendingOptions, courseIds: ["c"] };
+    expect((await pendingAssignments(context, opts)).assignments).toEqual([]);
+    const recent = await pendingAssignments(context, {
+      ...opts,
+      includeUndated: true,
+      undatedSince: "2026-10-01T00:00:00Z",
+    });
+    expect(recent.assignments.map((item) => item.courseWorkId)).toEqual([
+      "recent",
+    ]);
+    expect(recent.assignments[0]?.status).toBe("no_due");
+    expect(
+      (
+        await pendingAssignments(context, {
+          ...opts,
+          includeUndated: true,
+          includeReturned: true,
+        })
+      ).assignments.length,
+    ).toBe(3);
+  });
+  test("overview and negative search expose incomplete offset-zero sources through MCP", async () => {
+    pendingMock();
+    const result = await overview(context, {
+      ...options,
+      courseIds: ["c0"],
+      includePosts: false,
+    });
+    expect(result.partial).toBe(false);
+    expect(result.coverageComplete).toBe(false);
+    expect(result.courses[0]?.assignments).toEqual([]);
+    expect(result.courses[0]?.coverage.work.continuation?.offset).toBe(0);
+    const connection = await protocolClient();
+    try {
+      const search = await connection.client.callTool({
+        name: "classroom_search",
+        arguments: {
+          courseIds: ["c0"],
+          query: "nonexistent",
+          includePosts: false,
+        },
+      });
+      expect(search.structuredContent).toMatchObject({
+        corpusComplete: false,
+        resultsComplete: false,
+        matchesTruncated: false,
+        negativeResult: "notFoundInScannedItems",
+      });
+      const pending = await connection.client.callTool({
+        name: "classroom_get_pending_assignments",
+        arguments: { ...pendingOptions, courseIds: ["c0"] },
+      });
+      expect(pending.isError).not.toBe(true);
+      expect(pending.structuredContent).toMatchObject({
+        coverageComplete: true,
+      });
+    } finally {
+      await connection.close();
+    }
   });
 });
