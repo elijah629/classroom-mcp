@@ -1,0 +1,421 @@
+{
+  "stableRevision": "20261006",
+  "tools": [
+    {
+      "name": "classroom_courses_aliases_create",
+      "methodId": "classroom.courses.aliases.create"
+    },
+    {
+      "name": "classroom_courses_aliases_delete",
+      "methodId": "classroom.courses.aliases.delete"
+    },
+    {
+      "name": "classroom_courses_aliases_list",
+      "methodId": "classroom.courses.aliases.list"
+    },
+    {
+      "name": "classroom_courses_announcements_addOnAttachments_create",
+      "methodId": "classroom.courses.announcements.addOnAttachments.create"
+    },
+    {
+      "name": "classroom_courses_announcements_addOnAttachments_delete",
+      "methodId": "classroom.courses.announcements.addOnAttachments.delete"
+    },
+    {
+      "name": "classroom_courses_announcements_addOnAttachments_get",
+      "methodId": "classroom.courses.announcements.addOnAttachments.get"
+    },
+    {
+      "name": "classroom_courses_announcements_addOnAttachments_list",
+      "methodId": "classroom.courses.announcements.addOnAttachments.list"
+    },
+    {
+      "name": "classroom_courses_announcements_addOnAttachments_patch",
+      "methodId": "classroom.courses.announcements.addOnAttachments.patch"
+    },
+    {
+      "name": "classroom_courses_announcements_create",
+      "methodId": "classroom.courses.announcements.create"
+    },
+    {
+      "name": "classroom_courses_announcements_delete",
+      "methodId": "classroom.courses.announcements.delete"
+    },
+    {
+      "name": "classroom_courses_announcements_get",
+      "methodId": "classroom.courses.announcements.get"
+    },
+    {
+      "name": "classroom_courses_announcements_getAddOnContext",
+      "methodId": "classroom.courses.announcements.getAddOnContext"
+    },
+    {
+      "name": "classroom_courses_announcements_list",
+      "methodId": "classroom.courses.announcements.list"
+    },
+    {
+      "name": "classroom_courses_announcements_modifyAssignees",
+      "methodId": "classroom.courses.announcements.modifyAssignees"
+    },
+    {
+      "name": "classroom_courses_announcements_patch",
+      "methodId": "classroom.courses.announcements.patch"
+    },
+    {
+      "name": "classroom_courses_courseWork_addOnAttachments_create",
+      "methodId": "classroom.courses.courseWork.addOnAttachments.create"
+    },
+    {
+      "name": "classroom_courses_courseWork_addOnAttachments_delete",
+      "methodId": "classroom.courses.courseWork.addOnAttachments.delete"
+    },
+    {
+      "name": "classroom_courses_courseWork_addOnAttachments_get",
+      "methodId": "classroom.courses.courseWork.addOnAttachments.get"
+    },
+    {
+      "name": "classroom_courses_courseWork_addOnAttachments_list",
+      "methodId": "classroom.courses.courseWork.addOnAttachments.list"
+    },
+    {
+      "name": "classroom_courses_courseWork_addOnAttachments_patch",
+      "methodId": "classroom.courses.courseWork.addOnAttachments.patch"
+    },
+    {
+      "name": "classroom_courses_courseWork_addOnAttachments_studentSu_f3774cb7",
+      "methodId": "classroom.courses.courseWork.addOnAttachments.studentSubmissions.get"
+    },
+    {
+      "name": "classroom_courses_courseWork_addOnAttachments_studentSu_eecb42f5",
+      "methodId": "classroom.courses.courseWork.addOnAttachments.studentSubmissions.patch"
+    },
+    {
+      "name": "classroom_courses_courseWork_create",
+      "methodId": "classroom.courses.courseWork.create"
+    },
+    {
+      "name": "classroom_courses_courseWork_delete",
+      "methodId": "classroom.courses.courseWork.delete"
+    },
+    {
+      "name": "classroom_courses_courseWork_get",
+      "methodId": "classroom.courses.courseWork.get"
+    },
+    {
+      "name": "classroom_courses_courseWork_getAddOnContext",
+      "methodId": "classroom.courses.courseWork.getAddOnContext"
+    },
+    {
+      "name": "classroom_courses_courseWork_list",
+      "methodId": "classroom.courses.courseWork.list"
+    },
+    {
+      "name": "classroom_courses_courseWork_modifyAssignees",
+      "methodId": "classroom.courses.courseWork.modifyAssignees"
+    },
+    {
+      "name": "classroom_courses_courseWork_patch",
+      "methodId": "classroom.courses.courseWork.patch"
+    },
+    {
+      "name": "classroom_courses_courseWork_rubrics_create",
+      "methodId": "classroom.courses.courseWork.rubrics.create"
+    },
+    {
+      "name": "classroom_courses_courseWork_rubrics_delete",
+      "methodId": "classroom.courses.courseWork.rubrics.delete"
+    },
+    {
+      "name": "classroom_courses_courseWork_rubrics_get",
+      "methodId": "classroom.courses.courseWork.rubrics.get"
+    },
+    {
+      "name": "classroom_courses_courseWork_rubrics_list",
+      "methodId": "classroom.courses.courseWork.rubrics.list"
+    },
+    {
+      "name": "classroom_courses_courseWork_rubrics_patch",
+      "methodId": "classroom.courses.courseWork.rubrics.patch"
+    },
+    {
+      "name": "classroom_courses_courseWork_studentSubmissions_get",
+      "methodId": "classroom.courses.courseWork.studentSubmissions.get"
+    },
+    {
+      "name": "classroom_courses_courseWork_studentSubmissions_list",
+      "methodId": "classroom.courses.courseWork.studentSubmissions.list"
+    },
+    {
+      "name": "classroom_courses_courseWork_studentSubmissions_modifyA_fff89130",
+      "methodId": "classroom.courses.courseWork.studentSubmissions.modifyAttachments"
+    },
+    {
+      "name": "classroom_courses_courseWork_studentSubmissions_patch",
+      "methodId": "classroom.courses.courseWork.studentSubmissions.patch"
+    },
+    {
+      "name": "classroom_courses_courseWork_studentSubmissions_reclaim",
+      "methodId": "classroom.courses.courseWork.studentSubmissions.reclaim"
+    },
+    {
+      "name": "classroom_courses_courseWork_studentSubmissions_return",
+      "methodId": "classroom.courses.courseWork.studentSubmissions.return"
+    },
+    {
+      "name": "classroom_courses_courseWork_studentSubmissions_turnIn",
+      "methodId": "classroom.courses.courseWork.studentSubmissions.turnIn"
+    },
+    {
+      "name": "classroom_courses_courseWork_updateRubric",
+      "methodId": "classroom.courses.courseWork.updateRubric"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_addOnAttachments_create",
+      "methodId": "classroom.courses.courseWorkMaterials.addOnAttachments.create"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_addOnAttachments_delete",
+      "methodId": "classroom.courses.courseWorkMaterials.addOnAttachments.delete"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_addOnAttachments_get",
+      "methodId": "classroom.courses.courseWorkMaterials.addOnAttachments.get"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_addOnAttachments_list",
+      "methodId": "classroom.courses.courseWorkMaterials.addOnAttachments.list"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_addOnAttachments_patch",
+      "methodId": "classroom.courses.courseWorkMaterials.addOnAttachments.patch"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_create",
+      "methodId": "classroom.courses.courseWorkMaterials.create"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_delete",
+      "methodId": "classroom.courses.courseWorkMaterials.delete"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_get",
+      "methodId": "classroom.courses.courseWorkMaterials.get"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_getAddOnContext",
+      "methodId": "classroom.courses.courseWorkMaterials.getAddOnContext"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_list",
+      "methodId": "classroom.courses.courseWorkMaterials.list"
+    },
+    {
+      "name": "classroom_courses_courseWorkMaterials_patch",
+      "methodId": "classroom.courses.courseWorkMaterials.patch"
+    },
+    {
+      "name": "classroom_courses_create",
+      "methodId": "classroom.courses.create"
+    },
+    {
+      "name": "classroom_courses_delete",
+      "methodId": "classroom.courses.delete"
+    },
+    {
+      "name": "classroom_courses_get",
+      "methodId": "classroom.courses.get"
+    },
+    {
+      "name": "classroom_courses_getGradingPeriodSettings",
+      "methodId": "classroom.courses.getGradingPeriodSettings"
+    },
+    {
+      "name": "classroom_courses_list",
+      "methodId": "classroom.courses.list"
+    },
+    {
+      "name": "classroom_courses_patch",
+      "methodId": "classroom.courses.patch"
+    },
+    {
+      "name": "classroom_courses_posts_addOnAttachments_create",
+      "methodId": "classroom.courses.posts.addOnAttachments.create"
+    },
+    {
+      "name": "classroom_courses_posts_addOnAttachments_delete",
+      "methodId": "classroom.courses.posts.addOnAttachments.delete"
+    },
+    {
+      "name": "classroom_courses_posts_addOnAttachments_get",
+      "methodId": "classroom.courses.posts.addOnAttachments.get"
+    },
+    {
+      "name": "classroom_courses_posts_addOnAttachments_list",
+      "methodId": "classroom.courses.posts.addOnAttachments.list"
+    },
+    {
+      "name": "classroom_courses_posts_addOnAttachments_patch",
+      "methodId": "classroom.courses.posts.addOnAttachments.patch"
+    },
+    {
+      "name": "classroom_courses_posts_addOnAttachments_studentSubmissions_get",
+      "methodId": "classroom.courses.posts.addOnAttachments.studentSubmissions.get"
+    },
+    {
+      "name": "classroom_courses_posts_addOnAttachments_studentSubmiss_91c09544",
+      "methodId": "classroom.courses.posts.addOnAttachments.studentSubmissions.patch"
+    },
+    {
+      "name": "classroom_courses_posts_getAddOnContext",
+      "methodId": "classroom.courses.posts.getAddOnContext"
+    },
+    {
+      "name": "classroom_courses_studentGroups_create",
+      "methodId": "classroom.courses.studentGroups.create"
+    },
+    {
+      "name": "classroom_courses_studentGroups_delete",
+      "methodId": "classroom.courses.studentGroups.delete"
+    },
+    {
+      "name": "classroom_courses_studentGroups_list",
+      "methodId": "classroom.courses.studentGroups.list"
+    },
+    {
+      "name": "classroom_courses_studentGroups_patch",
+      "methodId": "classroom.courses.studentGroups.patch"
+    },
+    {
+      "name": "classroom_courses_studentGroups_studentGroupMembers_create",
+      "methodId": "classroom.courses.studentGroups.studentGroupMembers.create"
+    },
+    {
+      "name": "classroom_courses_studentGroups_studentGroupMembers_delete",
+      "methodId": "classroom.courses.studentGroups.studentGroupMembers.delete"
+    },
+    {
+      "name": "classroom_courses_studentGroups_studentGroupMembers_list",
+      "methodId": "classroom.courses.studentGroups.studentGroupMembers.list"
+    },
+    {
+      "name": "classroom_courses_students_create",
+      "methodId": "classroom.courses.students.create"
+    },
+    {
+      "name": "classroom_courses_students_delete",
+      "methodId": "classroom.courses.students.delete"
+    },
+    {
+      "name": "classroom_courses_students_get",
+      "methodId": "classroom.courses.students.get"
+    },
+    {
+      "name": "classroom_courses_students_list",
+      "methodId": "classroom.courses.students.list"
+    },
+    {
+      "name": "classroom_courses_teachers_create",
+      "methodId": "classroom.courses.teachers.create"
+    },
+    {
+      "name": "classroom_courses_teachers_delete",
+      "methodId": "classroom.courses.teachers.delete"
+    },
+    {
+      "name": "classroom_courses_teachers_get",
+      "methodId": "classroom.courses.teachers.get"
+    },
+    {
+      "name": "classroom_courses_teachers_list",
+      "methodId": "classroom.courses.teachers.list"
+    },
+    {
+      "name": "classroom_courses_topics_create",
+      "methodId": "classroom.courses.topics.create"
+    },
+    {
+      "name": "classroom_courses_topics_delete",
+      "methodId": "classroom.courses.topics.delete"
+    },
+    {
+      "name": "classroom_courses_topics_get",
+      "methodId": "classroom.courses.topics.get"
+    },
+    {
+      "name": "classroom_courses_topics_list",
+      "methodId": "classroom.courses.topics.list"
+    },
+    {
+      "name": "classroom_courses_topics_patch",
+      "methodId": "classroom.courses.topics.patch"
+    },
+    {
+      "name": "classroom_courses_update",
+      "methodId": "classroom.courses.update"
+    },
+    {
+      "name": "classroom_courses_updateGradingPeriodSettings",
+      "methodId": "classroom.courses.updateGradingPeriodSettings"
+    },
+    {
+      "name": "classroom_invitations_accept",
+      "methodId": "classroom.invitations.accept"
+    },
+    {
+      "name": "classroom_invitations_create",
+      "methodId": "classroom.invitations.create"
+    },
+    {
+      "name": "classroom_invitations_delete",
+      "methodId": "classroom.invitations.delete"
+    },
+    {
+      "name": "classroom_invitations_get",
+      "methodId": "classroom.invitations.get"
+    },
+    {
+      "name": "classroom_invitations_list",
+      "methodId": "classroom.invitations.list"
+    },
+    {
+      "name": "classroom_registrations_create",
+      "methodId": "classroom.registrations.create"
+    },
+    {
+      "name": "classroom_registrations_delete",
+      "methodId": "classroom.registrations.delete"
+    },
+    {
+      "name": "classroom_userProfiles_get",
+      "methodId": "classroom.userProfiles.get"
+    },
+    {
+      "name": "classroom_userProfiles_guardianInvitations_create",
+      "methodId": "classroom.userProfiles.guardianInvitations.create"
+    },
+    {
+      "name": "classroom_userProfiles_guardianInvitations_get",
+      "methodId": "classroom.userProfiles.guardianInvitations.get"
+    },
+    {
+      "name": "classroom_userProfiles_guardianInvitations_list",
+      "methodId": "classroom.userProfiles.guardianInvitations.list"
+    },
+    {
+      "name": "classroom_userProfiles_guardianInvitations_patch",
+      "methodId": "classroom.userProfiles.guardianInvitations.patch"
+    },
+    {
+      "name": "classroom_userProfiles_guardians_delete",
+      "methodId": "classroom.userProfiles.guardians.delete"
+    },
+    {
+      "name": "classroom_userProfiles_guardians_get",
+      "methodId": "classroom.userProfiles.guardians.get"
+    },
+    {
+      "name": "classroom_userProfiles_guardians_list",
+      "methodId": "classroom.userProfiles.guardians.list"
+    }
+  ]
+}

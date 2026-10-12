@@ -6,6 +6,7 @@ import {
   requireBearerAuth,
 } from "@modelcontextprotocol/server";
 import { config } from "@/lib/config";
+import { compressMcpResponse } from "@/lib/http-compression";
 import { buildMcpServer } from "@/lib/mcp-server";
 import { verifyMcpAccessToken } from "@/lib/mcp-token";
 
@@ -32,7 +33,8 @@ async function serve(request: Request): Promise<Response> {
 
   const auth = await gate(request);
   if (auth instanceof Response) return auth;
-  return handler.fetch(request, { authInfo: auth });
+  const response = await handler.fetch(request, { authInfo: auth });
+  return compressMcpResponse(request, response);
 }
 
 export const POST = serve;

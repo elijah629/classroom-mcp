@@ -15,6 +15,7 @@ type AuthCode = {
   redirectUri: string;
   codeChallenge: string;
   scopes: string[];
+  googleScopes?: string[];
   resource: string;
   googleSub: string;
   googleEmail: string;
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
         googleSub: authCode.googleSub,
         googleEmail: authCode.googleEmail,
         scopes: authCode.scopes,
+        googleScopes: authCode.googleScopes,
       };
       const access = await issueMcpAccessToken(
         { ...identity, googleAccessToken: authCode.googleAccessToken },
@@ -109,18 +111,25 @@ export async function POST(request: Request) {
       }
 
       const google = await refreshGoogleAccessToken(stored.googleRefreshToken);
+      const googleScopes =
+        google.scope?.split(/\s+/).filter(Boolean) ?? stored.googleScopes;
       const access = await issueMcpAccessToken(
         {
           clientId: stored.clientId,
           googleSub: stored.googleSub,
           googleEmail: stored.googleEmail,
           scopes: stored.scopes,
+          googleScopes,
           googleAccessToken: google.access_token,
         },
         google.expires_in,
       );
       // Reissue our opaque refresh token while preserving Google's refresh grant.
-      const rotatedRefresh = await issueMcpRefreshToken(stored);
+      const rotatedRefresh = await issueMcpRefreshToken({
+        ...stored,
+        googleScopes,
+        googleRefreshToken: google.refresh_token ?? stored.googleRefreshToken,
+      });
       return tokenResponse({
         access_token: access.token,
         token_type: "Bearer",

@@ -1,7 +1,15 @@
+import type { BlobResourceContents } from "@modelcontextprotocol/server";
+import type { GoogleContext } from "./classroom-api";
 import { config } from "./config";
-import { googleFetch, googleJson, limitText } from "./google-api";
+import {
+  assertGoogleScopes,
+  describeError,
+  googleFetch,
+  googleJson,
+} from "./google-api";
 
 const DRIVE = "https://www.googleapis.com/drive/v3";
+const DRIVE_READ = "https://www.googleapis.com/auth/drive.readonly";
 
 export type NormalizedAttachment =
   | {
@@ -44,28 +52,28 @@ export interface DriveFileMetadata {
   shortcutDetails?: { targetId?: string; targetMimeType?: string };
 }
 
-export interface AttachmentTextResult {
-  file: DriveFileMetadata;
-  text?: string;
-  truncated?: boolean;
-  extraction:
-    | "google-doc"
-    | "google-sheet"
-    | "google-slides"
-    | "pdf"
-    | "text"
-    | "metadata-only";
-  note?: string;
+interface AttachmentShape {
+  id?: string;
+  title?: string;
+  alternateLink?: string;
+  shareMode?: string;
+  url?: string;
+  thumbnailUrl?: string;
+  formUrl?: string;
+  responseUrl?: string;
+  driveFile?: AttachmentShape;
+  youtubeVideo?: AttachmentShape;
+  youTubeVideo?: AttachmentShape;
+  link?: AttachmentShape;
+  form?: AttachmentShape;
+  gem?: AttachmentShape;
+  notebook?: AttachmentShape;
 }
-
-function driveShape(raw: any): any {
-  // Course materials wrap DriveFile in SharedDriveFile.driveFile; student submissions do not.
-  return raw?.driveFile?.driveFile ?? raw?.driveFile;
-}
-
 export function normalizeAttachment(raw: unknown): NormalizedAttachment {
-  const value = raw as any;
-  const drive = driveShape(value);
+  if (!raw || typeof raw !== "object") return { kind: "unknown", raw };
+  const value = raw as AttachmentShape;
+  // Course materials wrap SharedDriveFile; student submissions contain DriveFile.
+  const drive = value.driveFile?.driveFile ?? value.driveFile;
   if (drive?.id) {
     return {
       kind: "drive",
@@ -127,6 +135,44 @@ export function normalizeAttachments(
   return (raw ?? []).map(normalizeAttachment);
 }
 
+export interface AttachmentReference {
+  attachment: NormalizedAttachment;
+  raw: unknown;
+  courseId?: string;
+  courseWorkId?: string;
+  itemId?: string;
+  source: "teacher" | "student" | "unspecified";
+  sourceType:
+    | "assignment"
+    | "submission"
+    | "material"
+    | "announcement"
+    | "file";
+}
+export function attachmentReferences(
+  raw: unknown[] | undefined,
+  source: Omit<AttachmentReference, "attachment" | "raw">,
+): AttachmentReference[] {
+  return (raw ?? []).map((item) => ({
+    ...source,
+    raw: item,
+    attachment: normalizeAttachment(item),
+  }));
+}
+export function attachmentUri(fileId: string) {
+  return `classroom-drive://files/${encodeURIComponent(fileId)}`;
+}
+export interface OriginalFileResult {
+  fileId: string;
+  file?: DriveFileMetadata;
+  uri: string;
+  url: string;
+  delivery: "original" | "drive_mcp";
+  reason?: string;
+  error?: Record<string, unknown>;
+  bytes?: number;
+  resource?: BlobResourceContents;
+}
 export async function getDriveFileMetadata(
   accessToken: string,
   fileId: string,
@@ -139,226 +185,161 @@ export async function getDriveFileMetadata(
   url.searchParams.set("supportsAllDrives", "true");
   return googleJson<DriveFileMetadata>(accessToken, url);
 }
-
-function collectDocStructural(elements: any[] | undefined, out: string[]) {
-  for (const element of elements ?? []) {
-    if (element.paragraph?.elements) {
-      for (const pe of element.paragraph.elements) {
-        if (typeof pe.textRun?.content === "string")
-          out.push(pe.textRun.content);
-      }
-    }
-    if (element.table?.tableRows) {
-      for (const row of element.table.tableRows) {
-        for (const cell of row.tableCells ?? [])
-          collectDocStructural(cell.content, out);
-        out.push("\n");
-      }
-    }
-    if (element.tableOfContents?.content)
-      collectDocStructural(element.tableOfContents.content, out);
+async function boundedBytes(
+  response: Response,
+  maximum: number,
+): Promise<Uint8Array> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maximum) {
+    await response.body?.cancel();
+    throw new Error("Original exceeds download byte budget; use Drive MCP.");
   }
-}
-
-function collectDocTabs(tabs: any[] | undefined, out: string[]) {
-  for (const tab of tabs ?? []) {
-    const title = tab.tabProperties?.title;
-    if (title) out.push(`\n# ${title}\n`);
-    collectDocStructural(tab.documentTab?.body?.content, out);
-    collectDocTabs(tab.childTabs, out);
-  }
-}
-
-async function readGoogleDoc(
-  accessToken: string,
-  fileId: string,
-): Promise<string> {
-  const url = new URL(
-    `https://docs.googleapis.com/v1/documents/${encodeURIComponent(fileId)}`,
-  );
-  url.searchParams.set("includeTabsContent", "true");
-  const doc = await googleJson<any>(accessToken, url);
-  const out: string[] = [];
-  if (Array.isArray(doc.tabs) && doc.tabs.length) collectDocTabs(doc.tabs, out);
-  else collectDocStructural(doc.body?.content, out);
-  return out
-    .join("")
-    .replace(/\n{4,}/g, "\n\n\n")
-    .trim();
-}
-
-function collectTextRuns(value: any, out: string[]) {
-  if (!value || typeof value !== "object") return;
-  if (typeof value.textRun?.content === "string")
-    out.push(value.textRun.content);
-  if (Array.isArray(value)) {
-    for (const item of value) collectTextRuns(item, out);
-    return;
-  }
-  for (const child of Object.values(value)) collectTextRuns(child, out);
-}
-
-async function readGoogleSlides(
-  accessToken: string,
-  fileId: string,
-): Promise<string> {
-  const presentation = await googleJson<any>(
-    accessToken,
-    `https://slides.googleapis.com/v1/presentations/${encodeURIComponent(fileId)}`,
-  );
-  const out: string[] = [];
-  const slides = presentation.slides ?? [];
-  slides.forEach((slide: any, index: number) => {
-    out.push(`\n# Slide ${index + 1}\n`);
-    const slideText: string[] = [];
-    collectTextRuns(slide, slideText);
-    out.push(slideText.join(""));
-  });
-  return out.join("\n").trim();
-}
-
-function quoteSheetTitle(title: string): string {
-  return `'${title.replace(/'/g, "''")}'!A1:Z1000`;
-}
-
-async function readGoogleSheet(
-  accessToken: string,
-  fileId: string,
-): Promise<string> {
-  const metaUrl = new URL(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(fileId)}`,
-  );
-  metaUrl.searchParams.set(
-    "fields",
-    "properties(title),sheets(properties(title,index))",
-  );
-  const spreadsheet = await googleJson<any>(accessToken, metaUrl);
-  const sheets = (spreadsheet.sheets ?? []).slice(0, 30);
-  const parts: string[] = [];
-  for (const sheet of sheets) {
-    const title = sheet.properties?.title;
-    if (!title) continue;
-    const range = quoteSheetTitle(title);
-    const url = new URL(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(fileId)}/values/${encodeURIComponent(range)}`,
-    );
-    url.searchParams.set("majorDimension", "ROWS");
-    url.searchParams.set("valueRenderOption", "FORMATTED_VALUE");
-    const values = await googleJson<{ values?: unknown[][] }>(accessToken, url);
-    parts.push(`\n# Sheet: ${title}\n`);
-    for (const row of values.values ?? []) {
-      parts.push(
-        row.map((cell) => String(cell ?? "").replace(/\t/g, " ")).join("\t"),
-      );
-    }
-  }
-  return parts.join("\n").trim();
-}
-
-async function readPdf(
-  accessToken: string,
-  fileId: string,
-  metadata: DriveFileMetadata,
-): Promise<string> {
-  const size = Number(metadata.size ?? "0");
-  if (size && size > config.maxPdfBytes) {
-    throw new Error(`pdf_too_large:${size}>${config.maxPdfBytes}`);
-  }
-  const url = new URL(`${DRIVE}/files/${encodeURIComponent(fileId)}`);
-  url.searchParams.set("alt", "media");
-  url.searchParams.set("supportsAllDrives", "true");
-  const response = await googleFetch(accessToken, url, {
-    headers: { Accept: "application/pdf" },
-  });
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > config.maxPdfBytes) {
-    throw new Error(`pdf_too_large:${buffer.byteLength}>${config.maxPdfBytes}`);
-  }
-
-  // unpdf ships a serverless PDF.js build. Keep limits strict because PDFs are untrusted input.
-  const { getDocumentProxy, extractText } = await import("unpdf");
-  const pdf = await getDocumentProxy(new Uint8Array(buffer), {
-    maxImageSize: 16_777_216,
-  });
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
   try {
-    if (pdf.numPages > config.maxPdfPages) {
-      throw new Error(
-        `pdf_too_many_pages:${pdf.numPages}>${config.maxPdfPages}`,
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maximum) {
+        await reader.cancel();
+        throw new Error(
+          "Original exceeds download byte budget; use Drive MCP.",
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+export async function readOriginalFile(
+  context: GoogleContext,
+  fileId: string,
+  maximum = config.maxAttachmentBytes,
+): Promise<OriginalFileResult> {
+  const result: OriginalFileResult = {
+    fileId,
+    uri: attachmentUri(fileId),
+    url: `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view`,
+    delivery: "drive_mcp",
+  };
+  try {
+    assertGoogleScopes(context.scopes, [
+      DRIVE_READ,
+      "https://www.googleapis.com/auth/drive",
+    ]);
+    result.file = await getDriveFileMetadata(context.accessToken, fileId);
+    result.url = result.file.webViewLink ?? result.url;
+    if (result.file.mimeType?.startsWith("application/vnd.google-apps."))
+      return {
+        ...result,
+        reason:
+          "Google-native document or shortcut: use Drive MCP to access the source. No implicit export or text extraction.",
+      };
+    if (maximum <= 0 || Number(result.file.size) > maximum)
+      return {
+        ...result,
+        reason: "Original exceeds download byte budget; use Drive MCP.",
+      };
+    const url = new URL(`${DRIVE}/files/${encodeURIComponent(fileId)}`);
+    url.searchParams.set("alt", "media");
+    url.searchParams.set("supportsAllDrives", "true");
+    const response = await googleFetch(context.accessToken, url);
+    const bytes = await boundedBytes(response, maximum);
+    return {
+      ...result,
+      delivery: "original",
+      bytes: bytes.byteLength,
+      resource: {
+        uri: result.uri,
+        mimeType:
+          result.file.mimeType ??
+          response.headers.get("Content-Type") ??
+          "application/octet-stream",
+        blob: Buffer.from(bytes).toString("base64"),
+      },
+    };
+  } catch (error) {
+    return {
+      ...result,
+      reason: "Original unavailable; use Drive MCP with this fileId or URL.",
+      error: describeError(error),
+    };
+  }
+}
+export async function collectOriginalFiles(
+  context: GoogleContext,
+  references: AttachmentReference[],
+  includeFiles: boolean,
+  clientSupportsBinaryResources: boolean,
+) {
+  const groups = new Map<string, AttachmentReference[]>();
+  for (const reference of references)
+    if (reference.attachment.kind === "drive") {
+      const key = reference.attachment.id;
+      groups.set(key, [...(groups.get(key) ?? []), reference]);
+    }
+  const resources: BlobResourceContents[] = [];
+  const files: Array<
+    Omit<OriginalFileResult, "resource"> & { references: AttachmentReference[] }
+  > = [];
+  let attempts = 0;
+  let totalBytes = 0;
+  for (const [fileId, refs] of groups) {
+    let result: OriginalFileResult;
+    if (
+      !includeFiles ||
+      !clientSupportsBinaryResources ||
+      attempts >= config.maxAttachmentFiles
+    ) {
+      result = {
+        fileId,
+        uri: attachmentUri(fileId),
+        url:
+          refs[0]?.attachment.kind === "drive"
+            ? (refs[0].attachment.url ??
+              `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view`)
+            : "",
+        delivery: "drive_mcp",
+        reason: !includeFiles
+          ? "Original download not requested; use Drive MCP or classroom_read_attachment."
+          : !clientSupportsBinaryResources
+            ? "Client cannot use binary resources; use Drive MCP."
+            : "Per-request file budget reached; use Drive MCP or classroom_read_attachment.",
+      };
+    } else {
+      attempts++;
+      result = await readOriginalFile(
+        context,
+        fileId,
+        Math.min(
+          config.maxAttachmentBytes,
+          config.maxAttachmentTotalBytes - totalBytes,
+        ),
       );
     }
-    const extraction = extractText(pdf, { mergePages: true }).then((r) =>
-      String(r.text),
-    );
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("pdf_extraction_timeout")), 15_000),
-    );
-    return await Promise.race([extraction, timeout]);
-  } finally {
-    await pdf.cleanup().catch(() => undefined);
+    const { resource, ...metadata } = result;
+    if (resource) {
+      resources.push(resource);
+      totalBytes += result.bytes ?? 0;
+    }
+    files.push({ ...metadata, references: refs });
   }
-}
-
-async function readPlainText(
-  accessToken: string,
-  fileId: string,
-): Promise<string> {
-  const url = new URL(`${DRIVE}/files/${encodeURIComponent(fileId)}`);
-  url.searchParams.set("alt", "media");
-  url.searchParams.set("supportsAllDrives", "true");
-  const response = await googleFetch(accessToken, url, {
-    headers: { Accept: "text/plain,*/*" },
-  });
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > config.maxPdfBytes)
-    throw new Error("text_file_too_large");
-  return new TextDecoder().decode(buffer);
-}
-
-export async function readDriveAttachment(
-  accessToken: string,
-  fileId: string,
-  maxChars = config.maxAttachmentTextChars,
-): Promise<AttachmentTextResult> {
-  const file = await getDriveFileMetadata(accessToken, fileId);
-  const mime = file.mimeType ?? "";
-  let text: string | undefined;
-  let extraction: AttachmentTextResult["extraction"] = "metadata-only";
-  let note: string | undefined;
-
-  if (mime === "application/vnd.google-apps.document") {
-    text = await readGoogleDoc(accessToken, fileId);
-    extraction = "google-doc";
-  } else if (mime === "application/vnd.google-apps.spreadsheet") {
-    text = await readGoogleSheet(accessToken, fileId);
-    extraction = "google-sheet";
-  } else if (mime === "application/vnd.google-apps.presentation") {
-    text = await readGoogleSlides(accessToken, fileId);
-    extraction = "google-slides";
-  } else if (mime === "application/pdf") {
-    text = await readPdf(accessToken, fileId, file);
-    extraction = "pdf";
-  } else if (
-    mime.startsWith("text/") ||
-    ["application/json", "application/xml", "application/javascript"].includes(
-      mime,
-    )
-  ) {
-    text = await readPlainText(accessToken, fileId);
-    extraction = "text";
-  } else {
-    note = `No text extractor is configured for MIME type ${mime || "unknown"}. Metadata and webViewLink are still returned.`;
-  }
-
-  if (text === undefined) return { file, extraction, note };
-  const limited = limitText(
-    text,
-    Math.max(1_000, Math.min(maxChars, config.maxAttachmentTextChars)),
-  );
   return {
-    file,
-    extraction,
-    text: limited.text,
-    truncated: limited.truncated,
-    note,
+    files,
+    resources,
+    references,
+    totalBytes,
+    note: "Original bytes only. Embedded binary resource support depends on the MCP client. If unavailable, use Drive MCP with fileId/URL. No extracted document text is supplied.",
   };
 }

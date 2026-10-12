@@ -1,7 +1,3 @@
-import { googleJson, paginate } from "./google-api";
-
-const CLASSROOM = "https://classroom.googleapis.com/v1";
-
 export interface ClassroomCourse {
   id: string;
   name: string;
@@ -99,6 +95,7 @@ export interface ClassroomSubmission {
   courseWorkId: string;
   id: string;
   userId?: string;
+  associatedWithDeveloper?: boolean;
   creationTime?: string;
   updateTime?: string;
   state?: string;
@@ -133,134 +130,6 @@ export interface ClassroomRubric {
       points?: number;
     }>;
   }>;
-}
-
-function coursePath(courseId: string): string {
-  return `${CLASSROOM}/courses/${encodeURIComponent(courseId)}`;
-}
-
-export async function listCourses(
-  accessToken: string,
-  includeArchived = false,
-): Promise<ClassroomCourse[]> {
-  const url = new URL(`${CLASSROOM}/courses`);
-  url.searchParams.set("pageSize", "100");
-  url.searchParams.append("courseStates", "ACTIVE");
-  if (includeArchived) url.searchParams.append("courseStates", "ARCHIVED");
-  return paginate<ClassroomCourse>({
-    accessToken,
-    baseUrl: url,
-    arrayField: "courses",
-  });
-}
-
-export async function getCourse(
-  accessToken: string,
-  courseId: string,
-): Promise<ClassroomCourse> {
-  return googleJson<ClassroomCourse>(accessToken, coursePath(courseId));
-}
-
-export async function listCourseWork(
-  accessToken: string,
-  courseId: string,
-): Promise<ClassroomCourseWork[]> {
-  const url = new URL(`${coursePath(courseId)}/courseWork`);
-  url.searchParams.set("pageSize", "100");
-  url.searchParams.set("courseWorkStates", "PUBLISHED");
-  url.searchParams.set("orderBy", "updateTime desc");
-  return paginate<ClassroomCourseWork>({
-    accessToken,
-    baseUrl: url,
-    arrayField: "courseWork",
-  });
-}
-
-export async function getCourseWork(
-  accessToken: string,
-  courseId: string,
-  courseWorkId: string,
-): Promise<ClassroomCourseWork> {
-  return googleJson<ClassroomCourseWork>(
-    accessToken,
-    `${coursePath(courseId)}/courseWork/${encodeURIComponent(courseWorkId)}`,
-  );
-}
-
-export async function listRubrics(
-  accessToken: string,
-  courseId: string,
-  courseWorkId: string,
-): Promise<ClassroomRubric[]> {
-  const url = new URL(
-    `${coursePath(courseId)}/courseWork/${encodeURIComponent(courseWorkId)}/rubrics`,
-  );
-  url.searchParams.set("pageSize", "1");
-  return paginate<ClassroomRubric>({
-    accessToken,
-    baseUrl: url,
-    arrayField: "rubrics",
-    maxPages: 1,
-  });
-}
-
-export async function listMySubmissions(
-  accessToken: string,
-  courseId: string,
-): Promise<ClassroomSubmission[]> {
-  const url = new URL(
-    `${coursePath(courseId)}/courseWork/-/studentSubmissions`,
-  );
-  url.searchParams.set("userId", "me");
-  url.searchParams.set("pageSize", "100");
-  return paginate<ClassroomSubmission>({
-    accessToken,
-    baseUrl: url,
-    arrayField: "studentSubmissions",
-  });
-}
-
-export async function listCourseWorkMaterials(
-  accessToken: string,
-  courseId: string,
-): Promise<ClassroomCourseWorkMaterial[]> {
-  const url = new URL(`${coursePath(courseId)}/courseWorkMaterials`);
-  url.searchParams.set("pageSize", "100");
-  url.searchParams.set("courseWorkMaterialStates", "PUBLISHED");
-  url.searchParams.set("orderBy", "updateTime desc");
-  return paginate<ClassroomCourseWorkMaterial>({
-    accessToken,
-    baseUrl: url,
-    arrayField: "courseWorkMaterial",
-  });
-}
-
-export async function listAnnouncements(
-  accessToken: string,
-  courseId: string,
-): Promise<ClassroomAnnouncement[]> {
-  const url = new URL(`${coursePath(courseId)}/announcements`);
-  url.searchParams.set("pageSize", "100");
-  url.searchParams.set("announcementStates", "PUBLISHED");
-  url.searchParams.set("orderBy", "updateTime desc");
-  return paginate<ClassroomAnnouncement>({
-    accessToken,
-    baseUrl: url,
-    arrayField: "announcements",
-  });
-}
-
-export async function listTopics(
-  accessToken: string,
-  courseId: string,
-): Promise<ClassroomTopic[]> {
-  const url = new URL(`${coursePath(courseId)}/topics`);
-  url.searchParams.set("pageSize", "100");
-  return paginate<ClassroomTopic>({
-    accessToken,
-    baseUrl: url,
-    arrayField: "topic",
-  });
 }
 
 export function dueDateIso(work: ClassroomCourseWork): string | null {
@@ -328,6 +197,7 @@ export function compactAssignment(
   submission?: ClassroomSubmission,
 ) {
   return {
+    ...work,
     courseId: work.courseId,
     id: work.id,
     title: work.title,
@@ -347,6 +217,7 @@ export function compactAssignment(
     status: assignmentStatus(work, submission),
     submission: submission
       ? {
+          ...submission,
           id: submission.id,
           state: submission.state,
           late: submission.late,

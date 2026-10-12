@@ -1,3 +1,5 @@
+import { classroomScopes } from "./discovery";
+
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
@@ -73,21 +75,21 @@ export const config = {
       .map((v) => v.trim().toLowerCase())
       .filter(Boolean);
   },
-  maxAttachmentTextChars: integer("MAX_ATTACHMENT_TEXT_CHARS", 80_000),
-  maxPdfBytes: integer("MAX_PDF_BYTES", 12 * 1024 * 1024),
-  maxPdfPages: integer("MAX_PDF_PAGES", 120),
+  maxAttachmentFiles: integer("MAX_ATTACHMENT_FILES", 5),
+  maxAttachmentBytes: integer("MAX_ATTACHMENT_BYTES", 5 * 1024 * 1024),
+  maxAttachmentTotalBytes: integer(
+    "MAX_ATTACHMENT_TOTAL_BYTES",
+    10 * 1024 * 1024,
+  ),
+  workflowConcurrency: integer("WORKFLOW_CONCURRENCY", 4),
+  maxWorkflowChars: integer("MAX_WORKFLOW_CHARS", 300_000),
 } as const;
 
 export const GOOGLE_SCOPES = [
   "openid",
   "email",
   "profile",
-  "https://www.googleapis.com/auth/classroom.courses.readonly",
-  "https://www.googleapis.com/auth/classroom.announcements.readonly",
-  "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
-  "https://www.googleapis.com/auth/classroom.student-submissions.me.readonly",
-  "https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly",
-  "https://www.googleapis.com/auth/classroom.topics.readonly",
+  ...classroomScopes,
   "https://www.googleapis.com/auth/drive.readonly",
 ] as const;
 

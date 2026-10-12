@@ -66,6 +66,7 @@ export async function GET(request: Request) {
         redirectUri: state.redirectUri,
         codeChallenge: state.codeChallenge,
         scopes: state.scopes,
+        googleScopes: google.scope?.split(/\s+/).filter(Boolean) ?? [],
         resource: state.resource,
         googleSub: user.sub,
         googleEmail: user.email,

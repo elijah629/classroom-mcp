@@ -1,113 +1,101 @@
-# Google Classroom MCP — Next.js + Google OAuth
+# Google Classroom MCP
 
-A remote, read-only Google Classroom MCP designed for ChatGPT/agent clients. It replaces a local stdio + `tokens.json` architecture with stateless Next.js App Router Route Handlers, OAuth discovery, an interactive Google sign-in flow, high-information Classroom tools, and Drive attachment text extraction.
+Remote Google Classroom MCP using Next.js Route Handlers, Google OAuth and the MCP server SDK. Student workflows are the entry point; **every method in the checked-in stable Discovery specification has its own tool**, including teacher/admin methods. Google still enforces roles, scopes, domain policies, licenses, add-on ownership and project association.
 
-## What this implementation does
+Current snapshot: Google revision `20261006`, **104 independent API tools + 7 workflow/attachment tools**. Exact method-to-tool names: [API_COVERAGE.md](API_COVERAGE.md). Long names receive a deterministic hash suffix to stay within 64 characters.
 
-- Runs `/mcp` as a web-standard MCP endpoint on the default Next.js Node.js runtime.
-- Uses the current `@modelcontextprotocol/server` v2 API instead of the v1 monolithic SDK.
-- Implements OAuth Protected Resource Metadata and OAuth Authorization Server Metadata.
-- Supports both OAuth Client ID Metadata Documents (CIMD) and Dynamic Client Registration (DCR) for client compatibility.
-- Sends the user through Google OAuth inside the MCP connection flow. There is no local `auth` CLI command and no `tokens.json`.
-- Keeps the deployment stateless: authorization state, short-lived authorization codes, MCP access tokens, and MCP refresh tokens are encrypted opaque JWE values using `AUTH_SECRET`.
-- Keeps the upstream Google refresh token out of MCP access tokens. The normal MCP bearer contains only the current short-lived Google access token; the Google refresh grant is only inside the encrypted MCP refresh token handled by `/oauth/token`.
-- Uses Google REST APIs through `fetch`, avoiding Node filesystem APIs and the Node-heavy `googleapis` client.
-- Reads Classroom coursework, the current student's submissions, announcements, classwork materials, topics, and course metadata.
-- Normalizes Classroom attachment types: Drive files, links, YouTube videos, Forms, Gemini Gems, and NotebookLM notebooks.
-- Reads actual text from attached Google Docs, Sheets, Slides, PDFs, and plain-text/JSON/XML files when requested.
+## Agent workflow tools
 
-The implementation is deliberately read-only. Add mutation tools later and request write scopes only for those operations.
+| Tool | Use |
+| --- | --- |
+| `classroom_overview` | Student's active classes, assignments, own submission status and recent posts. Start here for planning. |
+| `classroom_course_context` | One course, topics, assignments, own submissions, materials, announcements; optional original-file bundle. |
+| `classroom_assignment_context` | Assignment, course, rubrics, own submission and original attachments in one call; downloads enabled by default. |
+| `classroom_search` | Search titles, descriptions, announcements and teacher/student attachment **metadata** across courses. |
+| `classroom_attachment_bundle` | Collect assignment or class attachments; deduplicate file downloads while preserving all source references. |
+| `classroom_read_attachment` | Original stored Drive file as binary resource, or explicit Drive MCP handoff. |
+| `classroom_submit_assignment` | Find own submission, add specified existing files/links/videos, optionally turn in, then re-read state. |
 
-## Model-facing tools
+Tools preserve original Google records in `sources`; joined views contain IDs and status for navigation. `from`/`to` apply to assignment due dates and post update/creation timestamps. `includeNoDue` defaults true. Source records describe the bounded fetched set; joined views and course attachment bundles respect filters. Overview lists student enrollment; independent tools also support teacher/admin queries.
 
-### `classroom_overview`
-Use this first for planning. It joins active courses + all published coursework + the authenticated student's submissions, and by default also folds in announcements and class materials. It supports date bounds, assignment-status filtering, selected courses, optional no-due-date work, and bounded post counts. Assignment date bounds use due dates; announcement/material bounds use post update/creation time.
+Combined reads expose per-source errors, `partial`, `truncated`, and continuation instructions. List sources fetch at most three pages and `maxItemsPerSource` records (default 50, maximum 100). Overview defaults to at most ten courses, configurable to thirty. `continuation.arguments` can be passed to the named independent method; `offset` means skip that many records in the returned page. A failed course/source does not discard successful sources. An unavailable or incomplete submissions source cannot establish that an assignment is missing; such assignments use `unknown` status. Search is bounded; absence of a match does not establish absence from unfetched records.
 
-Typical questions: “What is due this week?”, “What did my teachers post this week?”, “What am I missing?”, “Give me a plan for tonight.”
+## Independent API tools
 
-### `classroom_course_context`
-Returns one joined course bundle: metadata, topics, assignments + submission status, classwork materials, announcements, and normalized attachments. With `attachmentMode: "text"`, it also reads a bounded number of Drive attachments so a model can directly reference a syllabus or handout.
+Tools map to official methods such as `classroom_courses_list`, `classroom_courses_courseWork_create`, and `classroom_courses_delete`. Each advertises parameter and request-body schemas, Google's method description, accepted OAuth scopes and mutation annotations. Parameters retain official names; request JSON is under `body`.
 
-Typical questions: “What are the grading rules in Chemistry?”, “What did my teacher post this week?”, “Use the syllabus when answering.”
-
-### `classroom_assignment_context`
-Returns a specific assignment, its rubric, the current student's submission/grade and rubric-grade state, teacher-provided attachments, and submitted attachments. It can also extract attachment text.
-
-Typical questions: “Break down this assignment,” “What exactly do I need to submit?”, “Compare my work to the directions.”
-
-### `classroom_search`
-Searches assignment titles/descriptions, materials, announcements, teacher attachment titles/links, and the authenticated student's own submitted attachment titles across selected courses and an optional date range. `searchAttachmentContents: true` performs a bounded deep search inside Drive attachments from both teachers and the student's submissions, useful when you remember a rule from a syllabus or an old file but not its filename.
-
-Typical questions: “Find my syllabus,” “Where did the teacher mention Cornell notes?”, “Find the handout about Chapter 4.”
-
-### `classroom_read_attachment`
-Reads one Drive file by ID. Google Docs, Sheets, Slides, text files, JSON/XML, and text-based PDFs return extracted text plus metadata. Unsupported binary types return metadata and the Drive URL rather than hallucinated content.
-
-
-## OAuth flow used by an MCP client
-
-The Google sign-in is part of the MCP connection rather than a separate setup command:
-
-```text
-MCP client
-  -> /mcp (no bearer token)
-  <- 401 + WWW-Authenticate + resource_metadata
-  -> /.well-known/oauth-protected-resource/mcp
-  -> /.well-known/oauth-authorization-server
-  -> /oauth/authorize (PKCE)
-  -> accounts.google.com
-  -> /oauth/google/callback
-  -> client redirect URI with MCP authorization code
-  -> /oauth/token
-  <- MCP access token + refresh token
-  -> /mcp (Bearer <MCP access token>)
+```json
+{"courseId":"123","id":"456"}
 ```
 
-Your Google refresh token never becomes the bearer token sent to `/mcp`; it stays inside the connector's encrypted refresh grant. This is what makes the experience behave like a normal “Connect with Google” MCP instead of asking you to paste credentials into the agent.
+Example `classroom_courses_courseWork_get` arguments. List tools return **one original Google page**, including `nextPageToken`; pass it back as `pageToken`. Repeated query parameters accept arrays. Patch/update methods retain `updateMask` and original body fields. Empty successful Google responses return `{}`. No writes are automatically retried. OAuth credentials are server-owned; transport controls such as API keys, JSONP, upload protocols and alternate non-JSON encodings are not model arguments.
 
-## Google Cloud setup
+### Reproducible stable API coverage
 
-1. Create/select a Google Cloud project and enable Google Classroom API, Google Drive API, Google Docs API, Google Sheets API, and Google Slides API.
-2. Configure the OAuth consent screen. For a private/personal deployment, keep the allowed account constrained with `ALLOWED_GOOGLE_EMAILS` as well.
-3. Create an OAuth 2.0 **Web application** client.
-4. Add this exact Google redirect URI: `https://YOUR_DOMAIN/oauth/google/callback`.
-5. Copy the client ID/client secret into the Vercel environment variables shown in `.env.example`.
+The MCP uses only the official stable v1 Discovery document.
 
-The requested Google scopes are read-only Classroom scopes plus `drive.readonly`. `drive.readonly` is a restricted Google scope, so a public/multi-user production app may require Google verification. A Google OAuth app left in Testing can also have short-lived refresh grants; move the consent configuration to the appropriate production state when you are ready.
-
-## Vercel deployment
-
-Set the environment variables from `.env.example`, deploy, then use:
-
-```text
-https://YOUR_DOMAIN/mcp
+```sh
+bun run generate:classroom             # regenerate catalog and coverage offline
+bun run generate:classroom --refresh   # download the official stable specification
+bun run check:classroom                # verify generated catalog
 ```
 
-as the remote MCP server URL in your MCP client / ChatGPT custom app. The first unauthenticated MCP request receives the OAuth challenge; the client discovers this server's OAuth metadata and opens the authorization flow. The authorization endpoint then redirects the browser to Google, and the callback returns an MCP authorization code to the client.
+The snapshot lives in `src/lib/discovery/stable.json`. No network discovery runs during tool calls. Review and commit the refreshed snapshot, catalog and coverage together.
 
-For ChatGPT, keep `offline_access` advertised. This implementation adds it even if a client omits it so that an MCP refresh token can be issued and the connector does not need a Google sign-in each time the short-lived access token expires.
+## Submission workflow and limits
 
-## Runtime
+`classroom_submit_assignment` finds the signed-in student's submission, adds only the specified new attachments, optionally calls `turnIn`, and re-reads the result. `turnIn` defaults to `false`. Each step reports its outcome, including partial completion when attachment changes succeed but turn-in fails. The workflow never automatically reclaims a submission, removes existing attachments, or retries writes.
 
-All MCP and OAuth endpoints use Next.js App Router Route Handlers on the default Node.js runtime. This matches Next.js 16 guidance and avoids Edge runtime package restrictions. The implementation still uses portable Web APIs where practical.
+Google requires `modifyAttachments` and `turnIn` calls to originate from the OAuth project that created the coursework or an add-on attachment on it. Many ordinary teacher-created assignments therefore cannot be submitted through an unrelated connector. The tools retain Google's error status, reasons and details. See [turnIn](https://developers.google.com/workspace/classroom/reference/rest/v1/courses.courseWork.studentSubmissions/turnIn) and [modifyAttachments](https://developers.google.com/workspace/classroom/reference/rest/v1/courses.courseWork.studentSubmissions/modifyAttachments).
 
-## Security notes
+## Original attachments
 
-This project is intentionally stateless. That makes Vercel deployment simple, but it means the server cannot centrally revoke one already-issued MCP refresh token or guarantee one-time authorization-code consumption without persistent storage. Google revocation or rotating `AUTH_SECRET` invalidates access globally. If you turn this from a personal connector into a multi-user service, replace the self-contained refresh-token/code storage with a database/KV-backed authorization server that supports revocation, one-time code use, token rotation/reuse detection, and account disconnects.
+**No document/PDF text extraction, summaries, OCR, content search or implicit conversion.** Classroom's own assignment descriptions and announcement text remain available verbatim.
 
-Set `ALLOWED_GOOGLE_EMAILS` for a personal deployment. Set `ALLOWED_CIMD_HOSTS=chatgpt.com` for ChatGPT; CIMD URL fetching is denied when this allowlist is empty.
+Stored PDF and other downloadable Drive files return original bytes as MCP embedded binary resources (`blob`, Base64 transport encoding, original MIME type). File names, IDs, URLs and source references accompany them. Authenticated `resources/read` also supports `classroom-drive://files/{fileId}` using the same MCP bearer authorization and Google grant. Downloads are bounded while streaming; an oversized file is handed off whole, never returned partially.
 
-## Current API boundaries
+Defaults: five unique download attempts, 5 MiB per file, 10 MiB total raw bytes per call. All configurable. Assignment context, attachment bundle and read-attachment download by default; course context requires `includeFiles: true`; overview/search never download. Google-native Docs/Sheets/Slides, shortcuts, oversized files and denied downloads return Drive MCP handoffs with IDs/URLs and reasons. No automatic export to PDF occurs.
 
-“Full post support” here means the Classroom objects the public API exposes to a student: coursework, course-work materials, and announcements, joined into model-friendly views. Classroom does not expose every piece of the website UI as a generic post/comment feed. Third-party Classroom add-ons, scan-only PDFs, Office binaries, videos, and arbitrary linked webpages are returned as typed metadata/links unless a dedicated extractor is added.
+MCP clients differ in support for presenting binary resources to agents. Set `clientSupportsBinaryResources: false` for an incompatible client; the connector returns Drive handoffs without downloading. Every original-file result retains IDs/URLs so the agent can use Drive MCP even if its client fails to expose the binary. Host HTTP response limits also apply; reduce raw-byte limits to allow for Base64 overhead (roughly 4/3) plus metadata. For a host with a 4.5 MiB response cap, set the total raw-byte budget to 3 MiB or lower.
 
-## Local development
+The MCP endpoint automatically applies lossless HTTP gzip to successful JSON and SSE responses when the client's `Accept-Encoding` accepts gzip. Clients without gzip support receive the original encoding; already encoded responses are preserved. Streaming gzip flushes each SSE chunk without waiting for the response to finish. Clients decode HTTP gzip before reading MCP messages, so embedded PDF/file bytes, names and MIME types remain unchanged. No new environment variables are required; redeploy to activate this change.
 
-Copy `.env.example` to `.env.local`, set `APP_ORIGIN` to the HTTPS origin your OAuth client can reach, then:
+Compression reduces transfer bytes, not the agent's decoded context size. It does not guarantee avoiding Vercel response limits, and PDFs may compress little. Keep attachment budgets and Drive handoffs enabled. For a conservative Vercel deployment, use `MAX_ATTACHMENT_BYTES=2097152` and `MAX_ATTACHMENT_TOTAL_BYTES=2097152`. Live Vercel proxy and target-client gzip behavior still require deployment testing.
+
+## Google Cloud and OAuth
+
+1. Enable **Google Classroom API** and **Google Drive API** in the OAuth project; Docs, Sheets and Slides APIs are no longer needed by this MCP.
+2. Configure Google consent and a Web application OAuth client. Add `https://YOUR_DOMAIN/oauth/google/callback` as redirect URI.
+3. Configure the Classroom scopes from both snapshots plus `drive.readonly` and OpenID identity scopes. Full Classroom scope coverage includes teacher/admin scopes; requesting them does not grant those roles. Google may require verification for public distribution and restricted Drive scopes.
+4. Set `.env.example` values. Use `ALLOWED_GOOGLE_EMAILS` to constrain a personal deployment and `ALLOWED_CIMD_HOSTS=chatgpt.com` for ChatGPT CIMD.
+
+Connect your MCP client to `https://YOUR_DOMAIN/mcp`. OAuth discovery, PKCE, CIMD/DCR and the existing sign-in/refresh architecture remain. Actual granted Google scopes are preserved through callback, encrypted authorization code, access/refresh grants and upstream refresh. Missing grants return an actionable reconnect error; existing pre-upgrade connections need reconnecting to obtain the expanded scopes. Google refresh tokens stay out of MCP access tokens. Google error details remain authoritative where permissions cannot be distinguished further.
+
+The authorization server remains stateless. Individual issued grants cannot be centrally revoked, authorization codes are not centrally consumed once, and refresh replay detection needs durable storage. Retain a personal deployment or add persistent grant storage before requiring those capabilities. This update does not add a database, deploy anything, or mutate real classes/submissions during tests.
+
+## Development and verification
+
+Use **Bun 1.4.3**, as declared in `packageManager`:
 
 ```bash
-npm install
-npm run dev
+bun install --frozen-lockfile
+bun run check:classroom
+bun test
+bun run lint
+bun run typecheck
+bun run build
+bun run dev
 ```
 
-Google OAuth normally requires a registered redirect URI, so for local interactive OAuth use an HTTPS tunnel and set `APP_ORIGIN` to that tunnel origin.
+Provide configured environment variables before building/running because OAuth metadata needs `APP_ORIGIN`. Read the installed Next.js guides under `node_modules/next/dist/docs/` before framework edits, per `AGENTS.md`.
+
+Tests compare Discovery coverage and schemas with protocol `tools/list`, exercise independent student/teacher/admin calls, request encoding, empty responses, pagination/continuations, scope preservation and refresh, Google errors, partial workflows, submission sequencing, byte-exact PDF resources, download deduplication/limits, Drive handoffs and protocol resource reads. Google HTTP is mocked. A real Google account and target client are still required to verify consent, actual turn-in eligibility and client-side PDF usability.
+
+### Breaking changes from 0.1
+
+- Read-only connector becomes a full Classroom API connector; reconnect for broader scopes.
+- `attachmentMode: "text"`, `maxChars`, `maxTextAttachments`, `maxCharsPerAttachment` and `searchAttachmentContents` are removed and rejected. `classroom_read_attachment` returns originals/handoffs instead of extracted text.
+- Workflow schemas use `maxItemsPerSource` and `maxCourses`; old `maxAssignmentsPerCourse`/`maxPostsPerCourse` are replaced. Raw records move into `sources`; inspect source errors and continuation metadata.
+- `MAX_ATTACHMENT_TEXT_CHARS`, `MAX_PDF_BYTES`, `MAX_PDF_PAGES` are replaced with raw-file budgets below.
+
+Developer Preview support has been removed. Delete `GOOGLE_API_KEY` and `GOOGLE_CLASSROOM_PREVIEW_VERSION` from Vercel environment settings; neither is read. Tools no longer accept `previewVersion` or send preview visibility headers. Stable rubric, grading-period and student-group methods remain available.

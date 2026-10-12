@@ -8,6 +8,7 @@ export interface McpIdentity {
   googleSub: string;
   googleEmail: string;
   scopes: string[];
+  googleScopes?: string[];
 }
 
 export interface McpAccessPayload extends McpIdentity {
@@ -50,6 +51,7 @@ export async function readMcpAccessToken(
     googleEmail: payload.googleEmail,
     googleAccessToken: payload.googleAccessToken,
     scopes: payload.scopes,
+    googleScopes: payload.googleScopes,
     exp: payload.exp,
   };
 }
@@ -64,6 +66,7 @@ export async function readMcpRefreshToken(
     googleEmail: payload.googleEmail,
     googleRefreshToken: payload.googleRefreshToken,
     scopes: payload.scopes,
+    googleScopes: payload.googleScopes,
   };
 }
 
@@ -80,6 +83,7 @@ export async function verifyMcpAccessToken(token: string): Promise<AuthInfo> {
         googleSub: payload.googleSub,
         googleEmail: payload.googleEmail,
         googleAccessToken: payload.googleAccessToken,
+        googleScopes: payload.googleScopes,
       },
     };
   } catch {
@@ -96,4 +100,12 @@ export function googleAccessTokenFromAuthInfo(auth: AuthInfo): string {
     throw new Error("authenticated_token_missing_google_access_token");
   }
   return accessToken;
+}
+
+export function googleScopesFromAuthInfo(auth: AuthInfo): string[] | undefined {
+  const scopes = auth.extra?.googleScopes;
+  return Array.isArray(scopes) &&
+    scopes.every((scope) => typeof scope === "string")
+    ? scopes
+    : undefined;
 }
